@@ -57,15 +57,95 @@ class HeapdumpCmd(gdb.Command):
         self.mbuckets = None
 
     def invoke(self, _arg, _from_tty):
-        v = gdb.parse_and_eval("'runtime.mbuckets'")
-        self.mbuckets = v.dereference()
+        self.mbuckets = gdb.parse_and_eval("'runtime.mbuckets'").dereference()
+        n, ok = self.mem_profile()
+
+        while True:
+            # emm, it's golang style. anyway, translate first
+            p = [None for i in range(n + 50)]
+            n, ok = self.mem_profile(p, True)
+            if ok:
+                p = p[:n]
+                break
+
+        print(p)
 
     def mem_profile(self, p=None, inuse_zero=False):
-        clear = True
+        if p is None:
+            p = []
+        n = 0
+        ok = False
 
-        current = self.mbuckets
-        while current is not None:
-            pass
+        clear = True
+        buckets = Bucket(self.mbuckets)
+        for b in buckets:
+            mp = b.mp()
+            if inuse_zero or mp['alloc_bytes'] != mp['free_bytes']:
+                n += 1
+            if mp['allocs'] != 0 or mp['frees'] != 0:
+                    clear = False
+
+        if clear:
+            mprof_GC()
+
+        ok = True
+        for idx, b in enumerate(buckets):
+            mp = b.mp()
+            if inuse_zero or mp['alloc_bytes'] != mp['free_bytes']:
+                record(p, b, idx)
+
+        return n, ok
+
+
+class Bucket(object):
+    def __init__(self, val):
+        self.val = val
+
+    def mp(self):
+        b = self.val
+        if b['typ'] != 1:
+            raise ValueError("bad use of bucket.mp")
+
+        data = add(
+            b, b.type.sizeof + b['nstk'] * gdb.Value(0).type.sizeof
+        )
+
+        memRecord_t = gdb.lookup_type('struct runtime.memRecord')
+        return data.cast(memRecord_t.pointer()).dereference()
+
+    def stk(self):
+        #TODO
+        b = self.val
+        stk = gdb.Value(add(b, b.type.sizeof))
+        return stk.dereference()
+
+    def __iter__(self):
+        v = self.val
+
+        while v:
+            yield Bucket(v)
+            v = v['allnext']
+        raise StopIteration
+
+
+def add(ptr, offset):
+    return gdb.Value(ptr.address + offset)
+
+
+def mprof_GC():
+    """shouldn't happen when world stopped"""
+    raise NotImplementedError('how do you turn this on')
+
+
+def record(p, b, idx):
+    mp = b.mp()
+    d = {}
+    d['alloc_bytes'] = mp['alloc_bytes']
+    d['free_bytes'] = mp['free_bytes']
+    d['alloc_objects'] = mp['allocs']
+    d['free_objects'] = mp['frees']
+    #TODO
+    print(b.stk().type)
 
 
 MemStatCmd()
