@@ -85,6 +85,7 @@ class HeapdumpCmd(gdb.Command):
 
         if clear:
             mprof_GC()
+            return
 
         ok = True
         for idx, b in enumerate(buckets):
@@ -98,6 +99,8 @@ class HeapdumpCmd(gdb.Command):
 class Bucket(object):
     def __init__(self, val):
         # val is not a ptr
+        if val.type.code == gdb.TYPE_CODE_PTR:
+            val = val.dereference()
         self.val = val
 
     def mp(self):
@@ -109,15 +112,15 @@ class Bucket(object):
             b, b.type.sizeof + b['nstk'] * gdb.lookup_type('uintptr').sizeof
         )
 
-        memRecord_t = gdb.lookup_type('struct runtime.memRecord')
-        return data.cast(memRecord_t.pointer()).dereference()
+        mem_record_t = gdb.lookup_type('struct runtime.memRecord')
+        return data.cast(mem_record_t.pointer()).dereference()
 
     def stk(self):
         # TODO
         b = self.val
         stk = add(b, b.type.sizeof)
         uintptr_t = gdb.lookup_type('uintptr')
-        return stk.cast(uintptr_t.vector(32).pointer())
+        return stk.cast(uintptr_t.array(32).pointer())
 
     def __iter__(self):
         v = self.val
@@ -148,7 +151,7 @@ def add(ptr, offset):
 
 def mprof_GC():
     """shouldn't happen when world stopped"""
-    raise NotImplementedError('how do you turn this on')
+    gdb.write('The heap is clear now, nothing do dump.')
 
 
 def record(p, b, idx):
@@ -159,7 +162,7 @@ def record(p, b, idx):
     d['alloc_objects'] = mp['allocs']
     d['free_objects'] = mp['frees']
     stk = list(b.stk().dereference()[i] for i in range(b.val['nstk']))
-    print(stk[0].type)
+    print(stk[0])
 
 
 MemStatCmd()
