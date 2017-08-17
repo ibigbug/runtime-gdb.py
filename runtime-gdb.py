@@ -68,8 +68,6 @@ class HeapdumpCmd(gdb.Command):
                 p = p[:n]
                 break
 
-        print(p)
-
     def mem_profile(self, p=None, inuse_zero=False):
         if p is None:
             p = []
@@ -99,6 +97,7 @@ class HeapdumpCmd(gdb.Command):
 
 class Bucket(object):
     def __init__(self, val):
+        # val is not a ptr
         self.val = val
 
     def mp(self):
@@ -107,17 +106,18 @@ class Bucket(object):
             raise ValueError("bad use of bucket.mp")
 
         data = add(
-            b, b.type.sizeof + b['nstk'] * gdb.Value(0).type.sizeof
+            b, b.type.sizeof + b['nstk'] * gdb.lookup_type('uintptr').sizeof
         )
 
         memRecord_t = gdb.lookup_type('struct runtime.memRecord')
         return data.cast(memRecord_t.pointer()).dereference()
 
     def stk(self):
-        #TODO
+        # TODO
         b = self.val
-        stk = gdb.Value(add(b, b.type.sizeof))
-        return stk.dereference()
+        stk = add(b, b.type.sizeof)
+        uintptr_t = gdb.lookup_type('uintptr')
+        return stk.cast(uintptr_t.vector(32).pointer())
 
     def __iter__(self):
         v = self.val
@@ -126,6 +126,20 @@ class Bucket(object):
             yield Bucket(v)
             v = v['allnext']
         raise StopIteration
+
+
+class Array(object):
+    def __init__(self, val):
+        self.val = val
+        self.low, self.high = val.type.range()
+
+    def __len__(self):
+        return self.high - self.low
+
+    def __getitem__(self, i):
+        if i < self.low or i >= self.high:
+            raise IndexError(i)
+        return self.val[i]
 
 
 def add(ptr, offset):
@@ -144,8 +158,8 @@ def record(p, b, idx):
     d['free_bytes'] = mp['free_bytes']
     d['alloc_objects'] = mp['allocs']
     d['free_objects'] = mp['frees']
-    #TODO
-    print(b.stk().type)
+    stk = list(b.stk().dereference()[i] for i in range(b.val['nstk']))
+    print(stk[0].type)
 
 
 MemStatCmd()
