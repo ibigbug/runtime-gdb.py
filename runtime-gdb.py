@@ -67,6 +67,7 @@ class HeapdumpCmd(gdb.Command):
             if ok:
                 p = p[:n]
                 break
+        print(p)
 
     def mem_profile(self, p=None, inuse_zero=False):
         if p is None:
@@ -98,7 +99,8 @@ class HeapdumpCmd(gdb.Command):
 
 class Bucket(object):
     def __init__(self, val):
-        # val is not a ptr
+        # not sure what's the problem
+        # val should always be a struct, not ptr
         if val.type.code == gdb.TYPE_CODE_PTR:
             val = val.dereference()
         self.val = val
@@ -116,7 +118,6 @@ class Bucket(object):
         return data.cast(mem_record_t.pointer()).dereference()
 
     def stk(self):
-        # TODO
         b = self.val
         stk = add(b, b.type.sizeof)
         uintptr_t = gdb.lookup_type('uintptr')
@@ -131,18 +132,12 @@ class Bucket(object):
         raise StopIteration
 
 
-class Array(object):
-    def __init__(self, val):
-        self.val = val
-        self.low, self.high = val.type.range()
+class CallersFrames(object):
+    def __init__(self, callers):
+        self.callers = callers
 
-    def __len__(self):
-        return self.high - self.low
-
-    def __getitem__(self, i):
-        if i < self.low or i >= self.high:
-            raise IndexError(i)
-        return self.val[i]
+    def __iter__(self):
+        pass
 
 
 def add(ptr, offset):
@@ -162,7 +157,27 @@ def record(p, b, idx):
     d['alloc_objects'] = mp['allocs']
     d['free_objects'] = mp['frees']
     stk = list(b.stk().dereference()[i] for i in range(b.val['nstk']))
-    print(stk[0])
+    map(func_for_pc, stk)
+
+
+def func_for_pc(pc):
+    return findfunc(pc)
+
+
+def findfunc(pc):
+    datap = findmoduledatap(pc)
+    if datap is None:
+        return
+    
+
+
+def findmoduledatap(pc):
+    datap = gdb.parse_and_eval("'runtime.firstmoduledata'")
+    while datap:
+        print(datap['minpc'], pc, datap['maxpc'])
+        if datap['minpc'] <= pc and pc < datap['maxpc']:
+            return datap
+        datap = datap['next']
 
 
 MemStatCmd()
